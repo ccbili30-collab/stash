@@ -2,6 +2,7 @@
 <resources>
     <string name="app_name">Stash</string>
     <string name="tile_label">Stash 临时截图</string>
+    <string name="tile_collect_label">Stash 收集</string>
     <string name="a11y_label">Stash 临时截图服务</string>
     <string name="a11y_desc">仅用于快捷磁贴截屏：把当前屏幕收进 Stash，不进相册。本服务不读取屏幕上的任何文字内容。</string>
     <string name="saved_toast">已收进 Stash</string>

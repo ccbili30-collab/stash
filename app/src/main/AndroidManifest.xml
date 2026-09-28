@@ -79,6 +79,18 @@
                 android:value="false" />
         </service>
 
+        <!-- 正常截图 / 收藏截图 随手切换：亮=自动收集，灭=只进相册 -->
+        <service
+            android:name=".service.CollectToggleTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_hi_archive01"
+            android:label="@string/tile_collect_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

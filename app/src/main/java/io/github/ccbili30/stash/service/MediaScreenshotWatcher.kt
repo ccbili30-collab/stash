@@ -41,6 +41,13 @@ object MediaScreenshotWatcher {
     private val _pendingClean = MutableStateFlow<List<Uri>>(emptyList())
     val pendingClean: StateFlow<List<Uri>> = _pendingClean
 
+    /**
+     * 用户主动熄灭收集的时刻（秒）。>0 表示存在"熄灭期"：
+     * 点亮/补扫时把游标直接推到当下，熄灭期间的截图视为垃圾不补收；
+     * 进程意外死亡不会有这个标记，恢复时照常全量补扫。
+     */
+    private var stoppedAtSec = 0L
+
     fun hasPermission(context: Context): Boolean {
         val perm = if (Build.VERSION.SDK_INT >= 33) {
             Manifest.permission.READ_MEDIA_IMAGES
@@ -72,10 +79,11 @@ object MediaScreenshotWatcher {
     }
 
     @Synchronized
-    fun stop() {
+    fun stop(context: Context) {
         observer?.let { obs -> runCatching { resolver?.unregisterContentObserver(obs) } }
         observer = null
         resolver = null
+        stoppedAtSec = System.currentTimeMillis() / 1000
     }
 
     /** 打开 app / 授予权限后调用：把上次处理之后的新截屏补收进来（幂等） */
@@ -86,9 +94,16 @@ object MediaScreenshotWatcher {
             if (!SettingsStore(app).autoScreenshotFlow.first()) return@launch
             val settings = SettingsStore(app)
             var since = settings.lastScreenshotSeenFlow.first()
+            val now = System.currentTimeMillis() / 1000
             if (since == 0L) {
                 // 首次：从现在开始，不回扫历史
-                settings.setLastScreenshotSeen(System.currentTimeMillis() / 1000)
+                settings.setLastScreenshotSeen(now)
+                return@launch
+            }
+            if (stoppedAtSec > 0) {
+                // 存在熄灭期：丢弃熄灭期间的截图，游标跳到当下
+                settings.setLastScreenshotSeen(maxOf(now, stoppedAtSec))
+                stoppedAtSec = 0
                 return@launch
             }
             val fresh = queryScreenshotsSince(app, since)

@@ -20,7 +20,7 @@ class StashApp : Application() {
                 if (enabled) {
                     MediaScreenshotWatcher.startIfPermitted(this@StashApp)
                 } else {
-                    MediaScreenshotWatcher.stop()
+                    MediaScreenshotWatcher.stop(this@StashApp)
                 }
             }
         }

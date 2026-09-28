@@ -110,7 +110,7 @@ fun SettingsScreen(onBack: () -> Unit, onOpenA11yGuide: () -> Unit) {
                     position = 0,
                     total = 3,
                     headline = { Text("系统截图自动收集") },
-                    supporting = { Text("用任意系统方式截图（按键/通知栏），自动收进 Stash；打开 app 时补收漏掉的（推荐，稳定不折腾）") },
+                    supporting = { Text("亮=截图自动进 Stash，灭=正常截图只进相册。下拉通知栏添加「Stash 收集」磁贴随手切换；打开 app 时自动补收漏掉的") },
                     trailing = {
                         Switch(
                             checked = autoScreenshot,
@@ -131,7 +131,7 @@ fun SettingsScreen(onBack: () -> Unit, onOpenA11yGuide: () -> Unit) {
                                         }
                                     } else {
                                         settings.setAutoScreenshot(false)
-                                        MediaScreenshotWatcher.stop()
+                                        MediaScreenshotWatcher.stop(context)
                                     }
                                 }
                             },
