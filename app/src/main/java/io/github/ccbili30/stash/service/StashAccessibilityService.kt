@@ -11,6 +11,9 @@ import android.provider.Settings
 import android.text.TextUtils
 import android.view.Display
 import android.view.accessibility.AccessibilityEvent
+import io.github.ccbili30.stash.data.StashRepository
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 
 /**
@@ -19,17 +22,37 @@ import kotlinx.coroutines.suspendCancellableCoroutine
  */
 class StashAccessibilityService : AccessibilityService() {
 
+    var shutter: FloatingShutter? = null
+        private set
+
+    private val shotScope =
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        shutter = FloatingShutter(this) { bitmap ->
+            shotScope.launch {
+                runCatching {
+                    StashRepository.get(this@StashAccessibilityService).addBitmap(bitmap)
+                }
+                bitmap.recycle()
+            }
+        }
     }
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
+        shutter?.hide()
+        shutter = null
+        shotScope.cancel()
         instance = null
         return super.onUnbind(intent)
     }
 
     override fun onDestroy() {
+        shutter?.hide()
+        shutter = null
+        shotScope.cancel()
         instance = null
         super.onDestroy()
     }
@@ -41,6 +64,13 @@ class StashAccessibilityService : AccessibilityService() {
         @Volatile
         var instance: StashAccessibilityService? = null
             private set
+
+        /** 唤起/关闭悬浮截屏球；服务未开启返回 false */
+        fun toggleShutter(): Boolean {
+            val svc = instance ?: return false
+            svc.shutter?.toggle()
+            return true
+        }
 
         /** 服务是否已在系统设置中开启 */
         fun isEnabled(context: Context): Boolean {
