@@ -143,16 +143,30 @@ fun SettingsScreen(onBack: () -> Unit, onOpenA11yGuide: () -> Unit) {
                     headline = { Text("临时截图") },
                     supporting = {
                         Text(
-                            if (a11yEnabled.value) "已开启：下拉通知栏点「Stash 临时截图」磁贴即截，不进相册"
-                            else "未开启：点这里按引导开启一次，之后磁贴一键截屏",
+                            when {
+                                a11yEnabled.value && StashAccessibilityService.isRunning ->
+                                    "已开启：下拉通知栏点「Stash 临时截图」磁贴唤起悬浮球"
+                                a11yEnabled.value ->
+                                    "服务被系统停住了：到无障碍设置里把它关掉再重新打开"
+                                else ->
+                                    "未开启：点这里按引导开启一次，之后磁贴一键截屏"
+                            },
                         )
                     },
                     leading = {
+                        val ok = a11yEnabled.value && StashAccessibilityService.isRunning
                         HiIcon(
-                            if (a11yEnabled.value) HiIcons.Scan01 else HiIcons.Accessibility01,
+                            when {
+                                ok -> HiIcons.Scan01
+                                a11yEnabled.value -> HiIcons.Alert01
+                                else -> HiIcons.Accessibility01
+                            },
                             size = 24.dp,
-                            tint = if (a11yEnabled.value) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                            tint = when {
+                                ok -> MaterialTheme.colorScheme.primary
+                                a11yEnabled.value -> MaterialTheme.colorScheme.error
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            },
                         )
                     },
                     onClick = { if (!a11yEnabled.value) onOpenA11yGuide() },

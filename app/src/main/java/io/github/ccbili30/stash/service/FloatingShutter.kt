@@ -141,11 +141,14 @@ class FloatingShutter(
 
     // ---- 对外 ----
 
-    /** 磁贴点击：显示 / 彻底关闭 */
-    fun toggle() {
-        when (state) {
+    /** 磁贴点击：显示 / 彻底关闭；false=悬浮窗被系统拦截（如 MIUI 悬浮窗权限） */
+    fun toggle(): Boolean {
+        return when (state) {
             State.HIDDEN -> showBall()
-            else -> hide()
+            else -> {
+                hide()
+                true
+            }
         }
     }
 
@@ -163,15 +166,21 @@ class FloatingShutter(
 
     // ---- 状态流转 ----
 
-    private fun showBall() {
+    private fun showBall(): Boolean {
         state = State.BALL
         folded = false
         setBallLook()
         shutterBtn.visibility = View.GONE
         controlParams = controlParams(ballSize, ballSize, ballX, ballY)
-        runCatching { wm.addView(controlRoot, controlParams) }
+        val added = runCatching { wm.addView(controlRoot, controlParams) }.isSuccess
+        if (!added) {
+            // 被 ROM 拦截（如 MIUI「显示悬浮窗」权限）——不再静默
+            state = State.HIDDEN
+            return false
+        }
         // 出现即贴边折叠待命
         snapAndFold(animate = false)
+        return true
     }
 
     /** 点球：分裂出截屏按钮，球变红× */

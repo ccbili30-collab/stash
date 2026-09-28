@@ -65,11 +65,13 @@ class StashAccessibilityService : AccessibilityService() {
         var instance: StashAccessibilityService? = null
             private set
 
-        /** 唤起/关闭悬浮截屏球；服务未开启返回 false */
-        fun toggleShutter(): Boolean {
+        /** 进程是否真活着（设置开关开着但进程被 ROM 杀掉时为 false） */
+        val isRunning: Boolean get() = instance != null
+
+        /** 唤起/关闭悬浮截屏球：true=已执行，false=服务没在跑，null=悬浮窗被系统拦截 */
+        fun toggleShutter(): Boolean? {
             val svc = instance ?: return false
-            svc.shutter?.toggle()
-            return true
+            return svc.shutter?.toggle()
         }
 
         /** 服务是否已在系统设置中开启 */
