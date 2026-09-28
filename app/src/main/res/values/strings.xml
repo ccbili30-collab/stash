@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Stash</string>
+    <string name="tile_label">Stash 临时截图</string>
+    <string name="a11y_label">Stash 临时截图服务</string>
+    <string name="a11y_desc">仅用于快捷磁贴截屏：把当前屏幕收进 Stash，不进相册。本服务不读取屏幕上的任何文字内容。</string>
+    <string name="saved_toast">已收进 Stash</string>
+    <string name="save_failed_toast">保存失败</string>
+    <string name="no_link_toast">没找到链接</string>
+    <string name="screenshot_toast">已截进 Stash</string>
+    <string name="screenshot_failed_toast">截屏失败，请重试</string>
+</resources>

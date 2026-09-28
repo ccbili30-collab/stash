@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 只声明截屏能力，canRetrieveWindowContent 保持 false：不读屏幕内容，仅截屏 -->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes=""
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault"
+    android:canRetrieveWindowContent="false"
+    android:canTakeScreenshot="true"
+    android:description="@string/a11y_desc"
+    android:notificationTimeout="100" />

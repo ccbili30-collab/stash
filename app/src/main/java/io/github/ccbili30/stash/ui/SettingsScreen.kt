@@ -1,0 +1,304 @@
+package io.github.ccbili30.stash.ui
+
+import android.Manifest
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.ccbili30.stash.BuildConfig
+import io.github.ccbili30.stash.data.SettingsStore
+import io.github.ccbili30.stash.data.StashRepository
+import io.github.ccbili30.stash.service.MediaScreenshotWatcher
+import io.github.ccbili30.stash.service.StashAccessibilityService
+import io.github.ccbili30.stash.update.UpdateChecker
+import io.github.ccbili30.stash.update.UpdateState
+import kotlinx.coroutines.launch
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SettingsScreen(onBack: () -> Unit, onOpenA11yGuide: () -> Unit) {
+    val context = LocalContext.current
+    val settings = remember { SettingsStore(context) }
+    val scope = rememberCoroutineScope()
+
+    val autoScreenshot by settings.autoScreenshotFlow.collectAsStateWithLifecycle(initialValue = false)
+    val dynamicColor by settings.dynamicColorFlow.collectAsStateWithLifecycle(initialValue = true)
+    val a11yEnabled = remember { mutableStateOf(StashAccessibilityService.isEnabled(context)) }
+
+    // 从无障碍设置页返回时刷新状态
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                a11yEnabled.value = StashAccessibilityService.isEnabled(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        scope.launch {
+            settings.setAutoScreenshot(granted)
+            if (granted) MediaScreenshotWatcher.startIfPermitted(context)
+        }
+    }
+
+    // ---- 更新流程状态 ----
+    var updateState by remember { mutableStateOf<UpdateState>(UpdateState.Idle) }
+    var release by remember { mutableStateOf<UpdateChecker.Release?>(null) }
+    var downloadedApk by remember { mutableStateOf<java.io.File?>(null) }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                ),
+                navigationIcon = {
+                    IconButton(onClick = onBack) { HiIcon(HiIcons.ArrowLeft01, contentDescription = "返回") }
+                },
+                title = { Text("设置", style = MaterialTheme.typography.titleLarge) },
+            )
+        },
+    ) { padding ->
+        Column(
+            Modifier
+                .padding(padding)
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp),
+        ) {
+            SectionTitle("收集")
+            CardGroup {
+                CardGroupRow(
+                    position = 0,
+                    total = 2,
+                    headline = { Text("自动收截屏") },
+                    supporting = { Text("系统相册出现新截屏时自动复制进 Stash（需要相册权限，只读截屏目录）") },
+                    trailing = {
+                        Switch(
+                            checked = autoScreenshot,
+                            onCheckedChange = { want ->
+                                scope.launch {
+                                    if (want) {
+                                        val perm = if (Build.VERSION.SDK_INT >= 33) {
+                                            Manifest.permission.READ_MEDIA_IMAGES
+                                        } else {
+                                            @Suppress("DEPRECATION")
+                                            Manifest.permission.READ_EXTERNAL_STORAGE
+                                        }
+                                        if (MediaScreenshotWatcher.hasPermission(context)) {
+                                            settings.setAutoScreenshot(true)
+                                            MediaScreenshotWatcher.startIfPermitted(context)
+                                        } else {
+                                            permissionLauncher.launch(perm)
+                                        }
+                                    } else {
+                                        settings.setAutoScreenshot(false)
+                                        MediaScreenshotWatcher.stop()
+                                    }
+                                }
+                            },
+                        )
+                    },
+                )
+                CardGroupRow(
+                    position = 1,
+                    total = 2,
+                    headline = { Text("临时截图") },
+                    supporting = {
+                        Text(
+                            if (a11yEnabled.value) "已开启：下拉通知栏点「Stash 临时截图」磁贴即截，不进相册"
+                            else "未开启：点这里按引导开启一次，之后磁贴一键截屏",
+                        )
+                    },
+                    leading = {
+                        HiIcon(
+                            if (a11yEnabled.value) HiIcons.Scan01 else HiIcons.Accessibility01,
+                            size = 24.dp,
+                            tint = if (a11yEnabled.value) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    },
+                    onClick = { if (!a11yEnabled.value) onOpenA11yGuide() },
+                )
+            }
+
+            SectionTitle("外观")
+            CardGroup {
+                CardGroupRow(
+                    position = 0,
+                    total = 1,
+                    headline = { Text("动态取色") },
+                    supporting = { Text("跟随壁纸取色（Material You）；关闭后使用 Ocean 蓝预设") },
+                    trailing = {
+                        Switch(
+                            checked = dynamicColor,
+                            onCheckedChange = { scope.launch { settings.setDynamicColor(it) } },
+                        )
+                    },
+                )
+            }
+
+            SectionTitle("关于")
+            CardGroup {
+                CardGroupRow(
+                    position = 0,
+                    total = 2,
+                    headline = { Text("版本") },
+                    supporting = { Text("${BuildConfig.VERSION_NAME} · 数据仅存本机") },
+                )
+                CardGroupRow(
+                    position = 1,
+                    total = 2,
+                    headline = { Text("检查更新") },
+                    supporting = {
+                        Text(
+                            when (val s = updateState) {
+                                is UpdateState.Idle -> "更新来自 GitHub Releases"
+                                is UpdateState.Checking -> "正在检查…"
+                                is UpdateState.Latest -> "已是最新版"
+                                is UpdateState.Error -> s.message
+                                else -> "有新版本"
+                            },
+                        )
+                    },
+                    trailing = {
+                        HiIcon(HiIcons.Download01, size = 20.dp)
+                    },
+                    onClick = {
+                        updateState = UpdateState.Checking
+                        scope.launch {
+                            val rel = UpdateChecker.check(BuildConfig.VERSION_NAME)
+                            release = rel
+                            updateState = if (rel == null) {
+                                UpdateState.Latest(BuildConfig.VERSION_NAME)
+                            } else {
+                                UpdateState.Available(rel)
+                            }
+                        }
+                    },
+                )
+            }
+            Spacer(Modifier.height(32.dp))
+        }
+    }
+
+    // 更新对话框
+    val rel = release
+    if (rel != null && updateState !is UpdateState.Checking &&
+        updateState !is UpdateState.Latest
+    ) {
+        AlertDialog(
+            onDismissRequest = { updateState = UpdateState.Idle },
+            title = { Text("新版本 ${rel.tag}") },
+            text = {
+                Column {
+                    if (rel.notes.isNotBlank()) {
+                        Text(rel.notes, style = MaterialTheme.typography.bodyMedium)
+                    }
+                    val s = updateState
+                    if (s is UpdateState.Downloading) {
+                        Spacer(Modifier.height(12.dp))
+                        LinearProgressIndicator(
+                            progress = { s.progress },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                when (val s = updateState) {
+                    is UpdateState.Available -> Button(onClick = {
+                        updateState = UpdateState.Downloading(0f)
+                        scope.launch {
+                            runCatching {
+                                UpdateChecker.download(context, rel) { p ->
+                                    updateState = UpdateState.Downloading(p)
+                                }
+                            }.onSuccess { apk ->
+                                downloadedApk = apk
+                                updateState = UpdateState.ReadyToInstall(apk)
+                            }.onFailure { e ->
+                                updateState = UpdateState.Error("下载失败：${e.message}")
+                            }
+                        }
+                    }) { Text("下载更新") }
+
+                    is UpdateState.Downloading -> TextButton(onClick = {}) {
+                        Text("${(s.progress * 100).toInt()}%")
+                    }
+
+                    is UpdateState.ReadyToInstall -> Button(onClick = {
+                        UpdateChecker.install(context, s.apk)
+                    }) { Text("安装") }
+
+                    is UpdateState.Error -> Button(onClick = {
+                        updateState = UpdateState.Downloading(0f)
+                        scope.launch {
+                            runCatching {
+                                UpdateChecker.download(context, rel) { p ->
+                                    updateState = UpdateState.Downloading(p)
+                                }
+                            }.onSuccess { apk ->
+                                updateState = UpdateState.ReadyToInstall(apk)
+                            }
+                        }
+                    }) { Text("重试") }
+
+                    else -> {}
+                }
+            },
+            dismissButton = {
+                if (updateState !is UpdateState.Downloading) {
+                    TextButton(onClick = { updateState = UpdateState.Idle }) { Text("稍后") }
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun SectionTitle(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 8.dp, top = 20.dp, bottom = 8.dp),
+    )
+}
