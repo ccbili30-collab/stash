@@ -30,6 +30,8 @@ object UpdateChecker {
     private const val REPO = "ccbili30-collab/stash"
     private const val API_LATEST = "https://api.github.com/repos/$REPO/releases/latest"
     private const val UA = "Stash-Updater/1.0"
+    private const val BROWSER_UA =
+        "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124 Mobile Safari/537.36"
 
     data class Release(
         val tag: String,
@@ -42,12 +44,18 @@ object UpdateChecker {
     /**
      * 检查最新 Release；比 currentVersion 新返回 Release，没有新版返回 null。
      * 网络失败抛异常——调用方必须区分"没新版"和"检查失败"，不能混为一谈。
+     *
+     * 数据源两层：api.github.com 接口（带更新说明，但未认证限流 60次/小时/IP，
+     * 共享出口 IP 常见 403）→ 降级用 releases/latest 网页 302 跳转解析版本号
+     * （与浏览器同待遇，无限流）。
      */
     suspend fun check(currentVersion: String): Release? = withContext(Dispatchers.IO) {
-        fetchLatest()?.takeIf { newer(it.tag, currentVersion) }
+        val viaApi = runCatching { fetchLatestApi() }.getOrNull()
+        val rel = viaApi ?: fetchLatestByRedirect()
+        rel?.takeIf { newer(it.tag, currentVersion) }
     }
 
-    private fun fetchLatest(): Release? {
+    private fun fetchLatestApi(): Release? {
         val conn = URL(API_LATEST).openConnection() as HttpURLConnection
         conn.connectTimeout = 12_000
         conn.readTimeout = 12_000
@@ -55,7 +63,10 @@ object UpdateChecker {
         conn.setRequestProperty("Accept", "application/vnd.github+json")
         try {
             val code = conn.responseCode
-            if (code != 200) throw IllegalStateException("GitHub 返回 $code（网络不稳）")
+            if (code == 403 || code == 429) {
+                throw IllegalStateException("接口限流（$code，共享 IP 配额用尽）")
+            }
+            if (code != 200) throw IllegalStateException("GitHub 返回 $code")
             val body = conn.inputStream.bufferedReader().readText()
             val json = JSONObject(body)
             val assets = json.optJSONArray("assets") ?: return null
@@ -76,6 +87,35 @@ object UpdateChecker {
                 notes = json.optString("body", ""),
                 apkUrl = apkUrl,
                 apkSize = apkSize,
+            )
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    /** 网页通道：releases/latest 会 302 到 releases/tag/<tag>，读跳转头即得版本号 */
+    private fun fetchLatestByRedirect(): Release {
+        val conn = URL("https://github.com/$REPO/releases/latest").openConnection() as HttpURLConnection
+        conn.instanceFollowRedirects = false
+        conn.connectTimeout = 12_000
+        conn.readTimeout = 12_000
+        conn.setRequestProperty("User-Agent", BROWSER_UA)
+        try {
+            val code = conn.responseCode
+            if (code != 301 && code != 302) {
+                throw IllegalStateException("GitHub 返回 $code（网络不通或被拦截）")
+            }
+            val location = conn.getHeaderField("Location") ?: throw IllegalStateException("拿不到跳转地址")
+            val tag = location.substringAfterLast('/').substringBefore('#')
+            if (!tag.startsWith("v")) throw IllegalStateException("版本号解析失败：$location")
+            // 命名约定：Release 资产固定叫 Stash-<tag>.apk
+            val apkUrl = "https://github.com/$REPO/releases/download/$tag/Stash-$tag.apk"
+            return Release(
+                tag = tag,
+                name = "Stash $tag",
+                notes = "（接口限流，降级通道：详细说明见 GitHub Release 页）",
+                apkUrl = apkUrl,
+                apkSize = 0L,
             )
         } finally {
             conn.disconnect()
@@ -119,7 +159,7 @@ object UpdateChecker {
         val conn = URL(release.apkUrl).openConnection() as HttpURLConnection
         conn.connectTimeout = 20_000
         conn.readTimeout = 60_000
-        conn.setRequestProperty("User-Agent", UA)
+        conn.setRequestProperty("User-Agent", BROWSER_UA)
         try {
             if (conn.responseCode != 200) throw IllegalStateException("HTTP ${conn.responseCode}")
             val total = conn.contentLengthLong.takeIf { it > 0 } ?: release.apkSize
