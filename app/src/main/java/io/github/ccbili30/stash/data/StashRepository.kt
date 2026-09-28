@@ -6,6 +6,7 @@ import android.net.Uri
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
@@ -86,6 +87,41 @@ class StashRepository private constructor(
     }.getOrNull()
 
     fun imageFile(fileName: String): File = File(File(context.filesDir, "media"), fileName)
+
+    /** 把私有目录里的图片复制回相册（Pictures/Stash），相册 app 立即可见；无需权限 */
+    suspend fun saveToGallery(entry: Entry): Boolean = withContext(Dispatchers.IO) {
+        val name = entry.fileName ?: return@withContext false
+        val file = imageFile(name)
+        if (!file.exists()) return@withContext false
+        runCatching {
+            val values = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, file.name)
+                put(android.provider.MediaStore.Images.Media.MIME_TYPE, mimeOf(file.name))
+                put(
+                    android.provider.MediaStore.Images.Media.RELATIVE_PATH,
+                    android.os.Environment.DIRECTORY_PICTURES + "/Stash",
+                )
+                put(android.provider.MediaStore.Images.Media.IS_PENDING, 1)
+            }
+            val uri = context.contentResolver.insert(
+                android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                values,
+            ) ?: return@runCatching false
+            context.contentResolver.openOutputStream(uri)?.use { out ->
+                file.inputStream().use { it.copyTo(out) }
+            } ?: return@runCatching false
+            values.clear()
+            values.put(android.provider.MediaStore.Images.Media.IS_PENDING, 0)
+            context.contentResolver.update(uri, values, null, null)
+            true
+        }.getOrDefault(false)
+    }
+
+    private fun mimeOf(fileName: String): String = when {
+        fileName.endsWith(".jpg", true) || fileName.endsWith(".jpeg", true) -> "image/jpeg"
+        fileName.endsWith(".webp", true) -> "image/webp"
+        else -> "image/png"
+    }
 
     /** 只读边界拿像素尺寸，不解码全图 */
     private fun probeSize(file: File): Pair<Int, Int> = runCatching {

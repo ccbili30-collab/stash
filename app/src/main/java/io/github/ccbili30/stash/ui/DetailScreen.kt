@@ -85,6 +85,22 @@ fun DetailScreen(
                 },
                 title = {},
                 actions = {
+                    if (entry?.type == EntryType.IMAGE) {
+                        IconButton(onClick = {
+                            entry?.let { img ->
+                                scope.launch {
+                                    val ok = repo.saveToGallery(img)
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        if (ok) "已存回相册（Pictures/Stash）" else "保存失败",
+                                        android.widget.Toast.LENGTH_SHORT,
+                                    ).show()
+                                }
+                            }
+                        }) {
+                            HiIcon(HiIcons.Download01, contentDescription = "存回相册")
+                        }
+                    }
                     IconButton(onClick = { entry?.let { shareOut(context, repo, it) } }) {
                         HiIcon(HiIcons.Share01, contentDescription = "分享出去")
                     }
