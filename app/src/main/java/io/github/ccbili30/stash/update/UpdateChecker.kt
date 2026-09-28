@@ -39,19 +39,23 @@ object UpdateChecker {
         val apkSize: Long,
     )
 
-    /** 检查最新 Release；比 currentVersion 新才返回，否则 null */
+    /**
+     * 检查最新 Release；比 currentVersion 新返回 Release，没有新版返回 null。
+     * 网络失败抛异常——调用方必须区分"没新版"和"检查失败"，不能混为一谈。
+     */
     suspend fun check(currentVersion: String): Release? = withContext(Dispatchers.IO) {
         fetchLatest()?.takeIf { newer(it.tag, currentVersion) }
     }
 
-    private fun fetchLatest(): Release? = runCatching {
+    private fun fetchLatest(): Release? {
         val conn = URL(API_LATEST).openConnection() as HttpURLConnection
-        conn.connectTimeout = 10_000
-        conn.readTimeout = 10_000
+        conn.connectTimeout = 12_000
+        conn.readTimeout = 12_000
         conn.setRequestProperty("User-Agent", UA)
         conn.setRequestProperty("Accept", "application/vnd.github+json")
         try {
-            if (conn.responseCode != 200) return null
+            val code = conn.responseCode
+            if (code != 200) throw IllegalStateException("GitHub 返回 $code（网络不稳）")
             val body = conn.inputStream.bufferedReader().readText()
             val json = JSONObject(body)
             val assets = json.optJSONArray("assets") ?: return null
@@ -66,7 +70,7 @@ object UpdateChecker {
                 }
             }
             apkUrl ?: return null
-            Release(
+            return Release(
                 tag = json.optString("tag_name", ""),
                 name = json.optString("name", ""),
                 notes = json.optString("body", ""),
@@ -76,9 +80,9 @@ object UpdateChecker {
         } finally {
             conn.disconnect()
         }
-    }.getOrNull()
+    }
 
-    /** 下载 APK 到 cacheDir/update/，onProgress 回调 0..1，返回 APK 文件 */
+    /** 下载 APK：断流自动重试，完成校验大小（半截包直接判废），返回 APK 文件 */
     suspend fun download(
         context: Context,
         release: Release,
@@ -86,8 +90,34 @@ object UpdateChecker {
     ): File = withContext(Dispatchers.IO) {
         val dir = File(context.cacheDir, "update").apply { mkdirs() }
         val target = File(dir, "stash-${release.tag}.apk")
+        var lastError: Exception = IllegalStateException("未知下载错误")
+        repeat(3) { attempt ->
+            try {
+                onProgress(0f)
+                downloadOnce(release, target, onProgress)
+                // 完整性校验：文件大小必须与 Release 声明一致（拿不到声明时退化为非空检查）
+                val expected = release.apkSize
+                val actual = target.length()
+                val ok = if (expected > 0) actual == expected else actual > 1_000_000
+                if (ok) return@withContext target
+                target.delete()
+                lastError = IllegalStateException("下载不完整（${actual / 1024}KB / 预期 ${expected / 1024}KB）")
+            } catch (e: Exception) {
+                lastError = e
+                target.delete()
+            }
+            if (attempt < 2) kotlinx.coroutines.delay(1500L)
+        }
+        throw lastError
+    }
+
+    private fun downloadOnce(
+        release: Release,
+        target: File,
+        onProgress: (Float) -> Unit,
+    ) {
         val conn = URL(release.apkUrl).openConnection() as HttpURLConnection
-        conn.connectTimeout = 15_000
+        conn.connectTimeout = 20_000
         conn.readTimeout = 60_000
         conn.setRequestProperty("User-Agent", UA)
         try {
@@ -106,7 +136,6 @@ object UpdateChecker {
                     }
                 }
             }
-            target
         } finally {
             conn.disconnect()
         }
@@ -119,15 +148,17 @@ object UpdateChecker {
                 Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                 Uri.parse("package:${context.packageName}"),
             ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            context.startActivity(intent)
+            runCatching { context.startActivity(intent) }
             return false
         }
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", apk)
-        val intent = Intent(Intent.ACTION_VIEW)
-            .setDataAndType(uri, "application/vnd.android-package-archive")
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-        context.startActivity(intent)
-        return true
+        return runCatching {
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", apk)
+            val intent = Intent(Intent.ACTION_VIEW)
+                .setDataAndType(uri, "application/vnd.android-package-archive")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(intent)
+            true
+        }.getOrDefault(false)
     }
 
     /** v1.2.0 > 1.0.9 这类 semver 比较 */

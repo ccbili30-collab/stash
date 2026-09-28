@@ -190,7 +190,7 @@ fun SettingsScreen(onBack: () -> Unit, onOpenA11yGuide: () -> Unit) {
                     supporting = {
                         Text(
                             when (val s = updateState) {
-                                is UpdateState.Idle -> "更新来自 GitHub Releases"
+                                is UpdateState.Idle -> "更新来自 GitHub Releases（不稳时可用浏览器下载）"
                                 is UpdateState.Checking -> "正在检查…"
                                 is UpdateState.Latest -> "已是最新版"
                                 is UpdateState.Error -> s.message
@@ -204,12 +204,18 @@ fun SettingsScreen(onBack: () -> Unit, onOpenA11yGuide: () -> Unit) {
                     onClick = {
                         updateState = UpdateState.Checking
                         scope.launch {
-                            val rel = UpdateChecker.check(BuildConfig.VERSION_NAME)
-                            release = rel
-                            updateState = if (rel == null) {
-                                UpdateState.Latest(BuildConfig.VERSION_NAME)
-                            } else {
-                                UpdateState.Available(rel)
+                            try {
+                                val rel = UpdateChecker.check(BuildConfig.VERSION_NAME)
+                                release = rel
+                                updateState = if (rel == null) {
+                                    UpdateState.Latest(BuildConfig.VERSION_NAME)
+                                } else {
+                                    UpdateState.Available(rel)
+                                }
+                            } catch (e: Exception) {
+                                // 网络断 ≠ 没新版，明确报错而不是谎报"已是最新"
+                                updateState = UpdateState.Error("检查失败：${e.message ?: "网络问题"}")
+                                release = null
                             }
                         }
                     },
@@ -225,7 +231,9 @@ fun SettingsScreen(onBack: () -> Unit, onOpenA11yGuide: () -> Unit) {
         updateState !is UpdateState.Latest
     ) {
         AlertDialog(
-            onDismissRequest = { updateState = UpdateState.Idle },
+            onDismissRequest = {
+                if (updateState !is UpdateState.Downloading) updateState = UpdateState.Idle
+            },
             title = { Text("新版本 ${rel.tag}") },
             text = {
                 Column {
@@ -238,6 +246,19 @@ fun SettingsScreen(onBack: () -> Unit, onOpenA11yGuide: () -> Unit) {
                         LinearProgressIndicator(
                             progress = { s.progress },
                             modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text(
+                            "下载中 ${(s.progress * 100).toInt()}%（断流会自动重试）",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (s is UpdateState.Error) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            s.message,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
                         )
                     }
                 }
@@ -255,7 +276,7 @@ fun SettingsScreen(onBack: () -> Unit, onOpenA11yGuide: () -> Unit) {
                                 downloadedApk = apk
                                 updateState = UpdateState.ReadyToInstall(apk)
                             }.onFailure { e ->
-                                updateState = UpdateState.Error("下载失败：${e.message}")
+                                updateState = UpdateState.Error("下载失败：${e.message}。网络太差就点「浏览器下载」。")
                             }
                         }
                     }) { Text("下载更新") }
@@ -265,7 +286,14 @@ fun SettingsScreen(onBack: () -> Unit, onOpenA11yGuide: () -> Unit) {
                     }
 
                     is UpdateState.ReadyToInstall -> Button(onClick = {
-                        UpdateChecker.install(context, s.apk)
+                        val started = UpdateChecker.install(context, s.apk)
+                        if (!started) {
+                            android.widget.Toast.makeText(
+                                context,
+                                "请允许「来自此来源安装」后，回来再点安装",
+                                android.widget.Toast.LENGTH_LONG,
+                            ).show()
+                        }
                     }) { Text("安装") }
 
                     is UpdateState.Error -> Button(onClick = {
@@ -277,6 +305,8 @@ fun SettingsScreen(onBack: () -> Unit, onOpenA11yGuide: () -> Unit) {
                                 }
                             }.onSuccess { apk ->
                                 updateState = UpdateState.ReadyToInstall(apk)
+                            }.onFailure { e ->
+                                updateState = UpdateState.Error("下载失败：${e.message}")
                             }
                         }
                     }) { Text("重试") }
@@ -286,7 +316,18 @@ fun SettingsScreen(onBack: () -> Unit, onOpenA11yGuide: () -> Unit) {
             },
             dismissButton = {
                 if (updateState !is UpdateState.Downloading) {
-                    TextButton(onClick = { updateState = UpdateState.Idle }) { Text("稍后") }
+                    // 浏览器兜底：系统浏览器自带断点续传，对付烂网络最可靠
+                    TextButton(onClick = {
+                        runCatching {
+                            context.startActivity(
+                                android.content.Intent(
+                                    android.content.Intent.ACTION_VIEW,
+                                    android.net.Uri.parse("https://github.com/ccbili30-collab/stash/releases/latest"),
+                                ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                            )
+                        }
+                        updateState = UpdateState.Idle
+                    }) { Text("浏览器下载") }
                 }
             },
         )
