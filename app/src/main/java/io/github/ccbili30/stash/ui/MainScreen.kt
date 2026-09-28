@@ -86,6 +86,20 @@ fun MainScreen(
         }
     }
 
+    // 打开 app 即补扫漏收的截屏（进程被杀期间错过的）
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        io.github.ccbili30.stash.service.MediaScreenshotWatcher.backfillOnceIfEnabled(context)
+    }
+
+    // 收进 Stash 后待清理的相册原件
+    val pendingClean by io.github.ccbili30.stash.service.MediaScreenshotWatcher.pendingClean
+        .collectAsStateWithLifecycle()
+    val deleteLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartIntentSenderForResult(),
+    ) {
+        io.github.ccbili30.stash.service.MediaScreenshotWatcher.consumePendingClean()
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -126,6 +140,44 @@ fun MainScreen(
         },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
+            if (pendingClean.isNotEmpty()) {
+                Surface(
+                    onClick = {
+                        runCatching {
+                            val pi = android.provider.MediaStore.createDeleteRequest(
+                                context.contentResolver,
+                                pendingClean,
+                            )
+                            deleteLauncher.launch(
+                                androidx.activity.result.IntentSenderRequest.Builder(pi.intentSender).build(),
+                            )
+                        }
+                    },
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    shadowElevation = 0.dp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                    ) {
+                        HiIcon(
+                            HiIcons.Tick01,
+                            size = 20.dp,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            "${pendingClean.size} 张截屏已收进 Stash · 点此清理相册原件",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        )
+                    }
+                }
+            }
             FilterRow(
                 filter = filter,
                 onFilter = { filter = it },

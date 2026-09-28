@@ -55,6 +55,7 @@ fun SettingsScreen(onBack: () -> Unit, onOpenA11yGuide: () -> Unit) {
 
     val autoScreenshot by settings.autoScreenshotFlow.collectAsStateWithLifecycle(initialValue = false)
     val dynamicColor by settings.dynamicColorFlow.collectAsStateWithLifecycle(initialValue = true)
+    val cleanAfterCollect by settings.cleanAfterCollectFlow.collectAsStateWithLifecycle(initialValue = false)
     val a11yEnabled = remember { mutableStateOf(StashAccessibilityService.isEnabled(context)) }
 
     // 从无障碍设置页返回时刷新状态
@@ -107,9 +108,9 @@ fun SettingsScreen(onBack: () -> Unit, onOpenA11yGuide: () -> Unit) {
             CardGroup {
                 CardGroupRow(
                     position = 0,
-                    total = 2,
-                    headline = { Text("自动收截屏") },
-                    supporting = { Text("系统相册出现新截屏时自动复制进 Stash（需要相册权限，只读截屏目录）") },
+                    total = 3,
+                    headline = { Text("系统截图自动收集") },
+                    supporting = { Text("用任意系统方式截图（按键/通知栏），自动收进 Stash；打开 app 时补收漏掉的（推荐，稳定不折腾）") },
                     trailing = {
                         Switch(
                             checked = autoScreenshot,
@@ -139,7 +140,19 @@ fun SettingsScreen(onBack: () -> Unit, onOpenA11yGuide: () -> Unit) {
                 )
                 CardGroupRow(
                     position = 1,
-                    total = 2,
+                    total = 3,
+                    headline = { Text("清理相册原件") },
+                    supporting = { Text("截屏收进 Stash 后，提示从相册删除系统截屏原件（每次弹系统确认）") },
+                    trailing = {
+                        Switch(
+                            checked = cleanAfterCollect,
+                            onCheckedChange = { scope.launch { settings.setCleanAfterCollect(it) } },
+                        )
+                    },
+                )
+                CardGroupRow(
+                    position = 2,
+                    total = 3,
                     headline = { Text("临时截图") },
                     supporting = {
                         Text(
